@@ -2,6 +2,12 @@
   (:require [clojure.string :as str]
             [clojure.set :refer :all]))
 
+(import '[java.net DatagramSocket
+                   DatagramPacket
+                   InetSocketAddress])
+
+(use 'clojure.tools.trace)
+
 ; https://www.ietf.org/rfc/rfc1035.txt
 
 ; 4.
@@ -95,7 +101,7 @@
     (reduce
       ; octet length is limited to 63 characters (first two bits used for
       ; message compression)
-      #(concat %1 (pack-num (bit-and 0x3F (count %2)) 2) (buff %2))
+      #(concat %1 (pack-num (bit-and 0x3F (count %2)) 1) (buff %2))
       (vector)
       (str/split (str/upper-case domain-name) #"\."))
     (list 0)))
@@ -183,24 +189,24 @@
 
 (defn deserialize-label [message-bytes offset]
   "Deserialize a label from a part of the message bytes"
-  (let [label-header (byte-to-num (subvec message-bytes offset (+ offset 2)))
-        label-offset (+ offset 2)
-        label-end    (+ label-offset label-header)
+  (let [_ (trace [message-bytes offset])
+        length-offset (get message-bytes offset)
+        label-offset (inc offset)
+        label-end    (+ label-offset length-offset)
         label-part   (String. (byte-array (subvec message-bytes label-offset label-end)))]
     {:label label-part :offset label-end}))
 
 (defn deserialize-labels
   [message-bytes offset labels]
-  (let [first-octet  (get message-bytes offset)
-        second-octet (get message-bytes (inc offset))]
+  (let [length-octet (get message-bytes offset)]
     (cond
-      (and (= first-octet 0x00) (= second-octet 0x00))
+      (and (= length-octet 0x00))
         {:labels labels :offset (inc offset)}
-      (= (bit-and 0xC0 first-octet) 0xC0)
+      (= (bit-and 0xC0 length-octet) 0xC0)
         ; this is a pointer to another part of the message
-        (let [pointer-offset (byte-to-num [(bit-and first-octet 0x3F) second-octet])
+        (let [pointer-offset (bit-and length-octet 0x3F)
               label (deserialize-label message-bytes pointer-offset)]
-          (recur message-bytes (+ offset 2) (conj labels (:label label))))
+          (recur message-bytes (inc offset) (conj labels (:label label))))
       :else
         (let [label (deserialize-label message-bytes offset)]
           (recur message-bytes (:offset label) (conj labels (:label label)))))))
@@ -244,3 +250,32 @@
   "I don't do a whole lot."
   [x]
   (println x "Hello, World!"))
+
+(defn udp-send
+  "Send a short textual message over a DatagramSocket to the specified
+  host and port. If the string is over 512 bytes long, it will be
+  truncated."
+  [^DatagramSocket socket payload host port]
+  (let [length (count payload)
+        address (InetSocketAddress. host port)
+        packet (DatagramPacket. payload length address)]
+    (.send socket packet)))
+
+(defn udp-receive
+  "Block until a UDP message is received on the given DatagramSocket, and
+  return the payload message as a string."
+  [^DatagramSocket socket]
+  (let [buffer (byte-array 512)
+        packet (DatagramPacket. buffer 512)]
+    (.receive socket packet)
+    (byte-array (.getData packet))))
+
+(defn test-query
+  [message]
+  (let [socket (DatagramSocket. 0)]
+    (try
+      (do
+        (.setSoTimeout socket 5000)
+        (udp-send socket (byte-array (serialize-message message)) "localhost" 53)
+        (udp-receive socket))
+      (finally (.close socket)))))
