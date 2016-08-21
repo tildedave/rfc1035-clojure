@@ -33,5 +33,9 @@
     "Header serialized to expected length")
   (is (=
     (serialize-header (->Header 123 0 :query false false false false 0 1 0 0 0))
-    '(0 123 128 0 0 1 0 0 0 0 0 0))
-    "Header is as expected"))
+    '(0 123 0 0 0 1 0 0 0 0 0 0))
+    "Header is as expected")
+  (is (=
+    (:qname (first (:questions (deserialize-message
+      (serialize-message (make-query-message 123 "www.google.com" :a :in))))))
+    "WWW.GOOGLE.COM")))

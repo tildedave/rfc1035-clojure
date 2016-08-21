@@ -182,26 +182,35 @@
         arcount (byte-to-num (subvec header-bytes 10 12))]
     (->Header id qr opcode aa tc rd ra rcode qdcount ancount nscount arcount)))
 
+(defn deserialize-label [message-bytes offset]
+  "Deserialize a label from a part of the message bytes"
+  (let [label-header (byte-to-num (subvec message-bytes offset (+ offset 2)))
+        label-offset (+ offset 2)
+        label-end    (+ label-offset label-header)
+        label-part   (String. (byte-array (subvec message-bytes label-offset label-end)))]
+    {:label label-part :offset label-end}))
+
 (defn deserialize-labels
   [message-bytes offset labels]
-  (cond
-    (= (byte-to-num (subvec message-bytes offset (+ offset 2))) 0)
-      {:label-parts labels :offset (inc offset)}
-    (> (bit-and 0xC (get message-bytes offset)) 0)
-      ; message compression
-      nil
-    :else
-      (let [label-offset (+ offset 2)
-            label-len    (byte-to-num (subvec message-bytes offset label-offset))
-            label-end    (+ label-offset label-len)
-            label-part   (String. (byte-array (subvec message-bytes label-offset label-end)))]
-        (recur message-bytes label-end (conj labels label-part)))))
+  (let [first-octet (get message-bytes offset)
+        second-octect (get message-bytes (inc offset))]
+    (cond
+      (and (= first-octet 0x00) (= second-octect 0x00))
+        {:labels labels :offset (inc offset)}
+      (not (= (bit-and 0xC first-octet) 0))
+        ; this is a pointer to another part of the message
+        (let [pointer-offset (bit-and (subvec message-bytes offset (+ offset 2) 0x3F))
+              label (deserialize-label message-bytes pointer-offset)]
+          (recur message-bytes (+ offset 2) (conj labels (:label label))))
+      :else
+        (let [label (deserialize-label message-bytes offset)]
+          (recur message-bytes (:offset label) (conj labels (:label label)))))))
 
 (defn deserialize-question
   "Deserialize a question from message bytes."
   [message-bytes offset]
   (let [labels    (deserialize-labels message-bytes offset [])
-        label-str (str/join "." (:label-parts labels))
+        label-str (str/join "." (:labels labels))
         label-end (:offset labels)
         qtype     (get (map-invert query-type-map)
                        (byte-to-num (subvec message-bytes label-end (+ label-end 2))))
