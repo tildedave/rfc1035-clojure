@@ -38,4 +38,9 @@
   (is (=
     (:qname (first (:questions (deserialize-message
       (serialize-message (make-query-message 123 "www.google.com" :a :in))))))
-    "WWW.GOOGLE.COM")))
+    "WWW.GOOGLE.COM"))
+  (is (=
+    (:qname (first (:questions (deserialize-message
+      [0 123 0 0 0 1 0 0 0 0 0 0 0 3 87 87 87 192 12 192 12 0 0 1 0 1])
+    "WWW.WWW.WWW"))))
+    "Handled pointers as part of the response"))

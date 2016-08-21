@@ -2,7 +2,6 @@
   (:require [clojure.string :as str]
             [clojure.set :refer :all]))
 
-
 ; https://www.ietf.org/rfc/rfc1035.txt
 
 ; 4.
@@ -192,14 +191,14 @@
 
 (defn deserialize-labels
   [message-bytes offset labels]
-  (let [first-octet (get message-bytes offset)
-        second-octect (get message-bytes (inc offset))]
+  (let [first-octet  (get message-bytes offset)
+        second-octet (get message-bytes (inc offset))]
     (cond
-      (and (= first-octet 0x00) (= second-octect 0x00))
+      (and (= first-octet 0x00) (= second-octet 0x00))
         {:labels labels :offset (inc offset)}
-      (not (= (bit-and 0xC first-octet) 0))
+      (= (bit-and 0xC0 first-octet) 0xC0)
         ; this is a pointer to another part of the message
-        (let [pointer-offset (bit-and (subvec message-bytes offset (+ offset 2) 0x3F))
+        (let [pointer-offset (byte-to-num [(bit-and first-octet 0x3F) second-octet])
               label (deserialize-label message-bytes pointer-offset)]
           (recur message-bytes (+ offset 2) (conj labels (:label label))))
       :else
