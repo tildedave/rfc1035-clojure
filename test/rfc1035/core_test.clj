@@ -37,7 +37,7 @@
     "Header is as expected")
   (is (=
     (:qname (first (:questions (deserialize-message
-      (serialize-message (make-query-message 123 "www.google.com" :a :in))))))
+      (serialize-message (make-query-message "www.google.com" :a :in))))))
     "WWW.GOOGLE.COM"))
   (is (=
     (:qname (first (:questions (deserialize-message

@@ -2,10 +2,6 @@
   (:require [clojure.string :as str]
             [clojure.set :refer :all]))
 
-(import '[java.net DatagramSocket
-                   DatagramPacket
-                   InetSocketAddress])
-
 (use 'clojure.tools.trace)
 
 ; https://www.ietf.org/rfc/rfc1035.txt
@@ -150,9 +146,9 @@
     (pack-num (:nscount header) 2)
     (pack-num (:arcount header) 2))))
 
-(defn make-query-message [id domain-name resource-type resource-class]
+(defn make-query-message [domain-name resource-type resource-class]
   ; 1 question
-  (let [header (->Header id false :query false false false false 0 1 0 0 0)
+  (let [header (->Header 0 false :query false false false false 0 1 0 0 0)
         question (->Question domain-name resource-type resource-class)]
     (->Message header [question] [] [] [])))
 
@@ -189,8 +185,7 @@
 
 (defn deserialize-label [message-bytes offset]
   "Deserialize a label from a part of the message bytes"
-  (let [_ (trace [message-bytes offset])
-        length-offset (get message-bytes offset)
+  (let [length-offset (get message-bytes offset)
         label-offset (inc offset)
         label-end    (+ label-offset length-offset)
         label-part   (String. (byte-array (subvec message-bytes label-offset label-end)))]
@@ -243,39 +238,3 @@
   (let [header        (deserialize-header (subvec message-bytes 0 12))
         questions     (deserialize-questions message-bytes 12 [] (:qdcount header))]
     (->Message header (:questions questions) [] [] [])))
-
-; 4.1.4 Message Compression TODO
-
-(defn foo
-  "I don't do a whole lot."
-  [x]
-  (println x "Hello, World!"))
-
-(defn udp-send
-  "Send a short textual message over a DatagramSocket to the specified
-  host and port. If the string is over 512 bytes long, it will be
-  truncated."
-  [^DatagramSocket socket payload host port]
-  (let [length (count payload)
-        address (InetSocketAddress. host port)
-        packet (DatagramPacket. payload length address)]
-    (.send socket packet)))
-
-(defn udp-receive
-  "Block until a UDP message is received on the given DatagramSocket, and
-  return the payload message as a string."
-  [^DatagramSocket socket]
-  (let [buffer (byte-array 512)
-        packet (DatagramPacket. buffer 512)]
-    (.receive socket packet)
-    (byte-array (.getData packet))))
-
-(defn test-query
-  [message]
-  (let [socket (DatagramSocket. 0)]
-    (try
-      (do
-        (.setSoTimeout socket 5000)
-        (udp-send socket (byte-array (serialize-message message)) "localhost" 53)
-        (udp-receive socket))
-      (finally (.close socket)))))
