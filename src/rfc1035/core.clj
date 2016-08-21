@@ -13,6 +13,9 @@
 ; rlength will be added during serialization
 (defrecord ResourceRecord [name type class ttl rdata])
 
+(defn buff [str]
+  (vec (.getBytes str)))
+
 (defn pack-num [n len]
   "Converts a number into a byte array with a given padding"
   (let [buff (java.nio.ByteBuffer/allocate len)]
@@ -62,10 +65,15 @@
     :* 255
 }))))
 
-(defn serialize-question [domain-name resource-type resource-class]
+(defn serialize-question
   "Serialize a question"
-
-)
+  [question]
+  (let [domain-name-buff (buff (:qname question))]
+    (concat
+      (list (count domain-name-buff))
+      domain-name-buff
+      (pack-num (serialize-resource-type (:qtype question)) 2)
+      (pack-num (serialize-resource-class (:qclass question)) 2))))
 
 (defn serialize-resource-record
   "Serialize a resource record"
