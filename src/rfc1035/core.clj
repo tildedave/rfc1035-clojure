@@ -26,9 +26,24 @@
   "Converts a byte buffer into a number"
  [bytes]
   (let [len (count bytes)]
-    (cond
-      (= len 1) (first bytes)
-      (= len 2) (+ (bit-shift-left (first bytes) 3) (second bytes)))))
+    (bit-and 0xFFFF
+      (cond
+        (= len 1) (first bytes)
+        (= len 2) (bit-or (bit-shift-left (first bytes) 8) (second bytes))
+        (= len 4)
+          (bit-or
+            (bit-shift-left (get bytes 0) 24)
+            (bit-shift-left (get bytes 1) 16)
+            (bit-shift-left (get bytes 2) 8)
+            (get bytes 3))))))
+
+(defn take-int16
+  [bytes offset]
+  (byte-to-num (subvec bytes offset (+ offset 2))))
+
+(defn take-int32
+  [bytes offset]
+  (byte-to-num (subvec bytes offset (+ offset 4))))
 
 (defn pack-num [n len]
   "Converts a number into a byte array with a given padding"
@@ -177,10 +192,10 @@
         ra      (bit-test (get header-bytes 2) 0)
         ; upper 4 bits of 4th byte = Z code and is ignored
         rcode   (get (map-invert response-code-map) (bit-and 15 (get header-bytes 3)))
-        qdcount (byte-to-num (subvec header-bytes 4 6))
-        ancount (byte-to-num (subvec header-bytes 6 8))
-        nscount (byte-to-num (subvec header-bytes 8 10))
-        arcount (byte-to-num (subvec header-bytes 10 12))]
+        qdcount (take-int16 header-bytes 4)
+        ancount (take-int16 header-bytes 6)
+        nscount (take-int16 header-bytes 8)
+        arcount (take-int16 header-bytes 10)]
     (->Header id qr opcode aa tc rd ra rcode qdcount ancount nscount arcount)))
 
 (defn deserialize-label [message-bytes offset]
@@ -199,12 +214,31 @@
         {:labels labels :offset (inc offset)}
       (= (bit-and 0xC0 length-octet) 0xC0)
         ; this is a pointer to another part of the message
-        (let [pointer-offset (bit-and length-octet 0x3F)
-              label (deserialize-label message-bytes pointer-offset)]
-          (recur message-bytes (inc offset) (conj labels (:label label))))
+        (let [pointer-offset
+            (bit-clear (bit-clear (take-int16 message-bytes offset) 15) 14)]
+          (recur message-bytes pointer-offset labels))
       :else
         (let [label (deserialize-label message-bytes offset)]
           (recur message-bytes (:offset label) (conj labels (:label label)))))))
+
+(defn deserialize-resource-record
+  "Deserialize a resource record from message bytes."
+  [message-bytes offset]
+  (if (> offset (count message-bytes))
+    nil
+    (let [labels (deserialize-labels message-bytes offset [])
+          label-str     (str/join "." (:labels labels))
+          label-end     (:offset labels)
+          resource-type (get (map-invert resource-type-map)
+                             (take-int16 message-bytes label-end))
+          qclass        (get (map-invert resource-class-map)
+                             (take-int16 message-bytes (+ label-end 2)))
+          ttl           (take-int32 message-bytes (+ label-end 4))
+          rdlength      (take-int16 message-bytes (+ label-end 8))
+          rdata-offset  (+ label-end 10)
+          rdata-end     (+ rdata-offset rdlength)
+          rdata         (deserialize-labels message-bytes rdata-offset [])]
+      {:offset rdata-end :record (->ResourceRecord label-str resource-type qclass ttl rdata)})))
 
 (defn deserialize-question
   "Deserialize a question from message bytes."
@@ -231,10 +265,22 @@
         (conj questions (:question question))
         (dec num-questions)))))
 
+(defn deserialize-resource-records
+  [message-bytes offset records num-records]
+  (if
+    (= num-records 0) {:records records :offset offset}
+    (let [record (deserialize-resource-record message-bytes offset)]
+      (recur message-bytes
+        (:offset record)
+        (conj records (:record record))
+        (dec num-records)))))
+
 (defn deserialize-message
   "Deserialize a message into its component parts"
   [message-bytes]
   ; header is 12 bytes
-  (let [header        (deserialize-header (subvec message-bytes 0 12))
-        questions     (deserialize-questions message-bytes 12 [] (:qdcount header))]
-    (->Message header (:questions questions) [] [] [])))
+  (let [header         (deserialize-header (subvec message-bytes 0 12))
+        questions      (deserialize-questions message-bytes 12 [] (:qdcount header))
+        answer-records (deserialize-resource-records message-bytes (:offset questions) [] (:ancount header))
+        ns-records     (deserialize-resource-records message-bytes (:offset answer-records) [] (:nscount header))]
+    (->Message header (:questions questions) [answer-records] [ns-records] [])))

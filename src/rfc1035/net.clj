@@ -9,7 +9,7 @@
   "Send a short textual message over a DatagramSocket to the specified
   host and port. If the string is over 512 bytes long, it will be
   truncated."
-  [^DatagramSocket socket payload host port]
+  [^DatagramSocket socket payload ^String host ^Integer port]
   (let [length (count payload)
         address (InetSocketAddress. host port)
         packet (DatagramPacket. payload length address)]
