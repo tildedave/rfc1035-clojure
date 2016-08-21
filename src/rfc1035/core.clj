@@ -10,7 +10,7 @@
 (defrecord Message [header questions answer-resources authority-resources additional-resources])
 
 ; 4.1.1
-(defrecord Header [id is-response opcode aa tc rd ra z rcode qdcount ancount nscount])
+(defrecord Header [id qr opcode aa tc rd ra rcode qdcount ancount nscount arcount])
 
 ; 4.1.2
 (defrecord Question [qname qtype qclass])
@@ -126,8 +126,6 @@
       (pack-num ((:qtype question) resource-type-map) 2)
       (pack-num ((:qclass question) resource-class-map) 2))))
 
-(defrecord Header [id qr opcode aa tc rd ra rcode qdcount ancount nscount arcount])
-
 ; (defn serialize-remote-query
 ;   "Serialize a remote query"
 ;   [id question]
@@ -211,7 +209,7 @@
   (let [length-octet (get message-bytes offset)]
     (cond
       (and (= length-octet 0x00))
-        {:labels labels :offset (inc offset)}
+        {:labels (str/join "." labels) :offset (inc offset)}
       (= (bit-and 0xC0 length-octet) 0xC0)
         ; this is a pointer to another part of the message
         (let [pointer-offset
@@ -227,7 +225,6 @@
   (if (> offset (count message-bytes))
     nil
     (let [labels (deserialize-labels message-bytes offset [])
-          label-str     (str/join "." (:labels labels))
           label-end     (:offset labels)
           resource-type (get (map-invert resource-type-map)
                              (take-int16 message-bytes label-end))
@@ -237,20 +234,19 @@
           rdlength      (take-int16 message-bytes (+ label-end 8))
           rdata-offset  (+ label-end 10)
           rdata-end     (+ rdata-offset rdlength)
-          rdata         (deserialize-labels message-bytes rdata-offset [])]
-      {:offset rdata-end :record (->ResourceRecord label-str resource-type qclass ttl rdata)})))
+          rdata         (:labels (deserialize-labels message-bytes rdata-offset []))]
+      {:offset rdata-end :record (->ResourceRecord (:labels labels) resource-type qclass ttl rdata)})))
 
 (defn deserialize-question
   "Deserialize a question from message bytes."
   [message-bytes offset]
   (let [labels    (deserialize-labels message-bytes offset [])
-        label-str (str/join "." (:labels labels))
         label-end (:offset labels)
         qtype     (get (map-invert query-type-map)
                        (byte-to-num (subvec message-bytes label-end (+ label-end 2))))
         qclass    (get (map-invert resource-class-map)
                        (byte-to-num (subvec message-bytes (+ label-end 2) (+ label-end 4))))]
-    {:question (->Question label-str qtype qclass)
+    {:question (->Question (:labels labels) qtype qclass)
      :offset   (+ label-end 4)}))
       ; label-end
       ; (byte-to-num (subvec message-bytes label-end (+ label-end 2))))))
@@ -282,5 +278,10 @@
   (let [header         (deserialize-header (subvec message-bytes 0 12))
         questions      (deserialize-questions message-bytes 12 [] (:qdcount header))
         answer-records (deserialize-resource-records message-bytes (:offset questions) [] (:ancount header))
-        ns-records     (deserialize-resource-records message-bytes (:offset answer-records) [] (:nscount header))]
-    (->Message header (:questions questions) [answer-records] [ns-records] [])))
+        ns-records     (deserialize-resource-records message-bytes (:offset answer-records) [] (:nscount header))
+        ar-records     (deserialize-resource-records message-bytes (:offset ns-records) [] (:arcount header))]
+    (->Message header
+      (:questions questions)
+      (:records answer-records)
+      (:records ns-records)
+      (:records ar-records))))
