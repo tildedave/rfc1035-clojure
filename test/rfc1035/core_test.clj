@@ -23,15 +23,15 @@
     (serialize-domain-name "f.isi.arpa")))
   (is (=
     (serialize-question (->Question "www.google.com" :a :in))
-    '(16 3 87 87 87 6 71 79 79 71 76 69 3 67 79 77 0 0 1 0 1)))
+    '(0 16 3 87 87 87 6 71 79 79 71 76 69 3 67 79 77 0 0 1 0 1)))
   (is (=
     (serialize-question (->Question "www.google.com" :mx :ch))
-    '(16 3 87 87 87 6 71 79 79 71 76 69 3 67 79 77 0 0 15 0 3)))
+    '(0 16 3 87 87 87 6 71 79 79 71 76 69 3 67 79 77 0 0 15 0 3)))
   (is (=
     (count (serialize-header (->Header 123 0 :query false false false false 0 1 0 0 0)))
     12)
     "Header serialized to expected length")
   (is (=
     (serialize-header (->Header 123 0 :query false false false false 0 1 0 0 0))
-    '(0 123 64 0 0 1 0 0 0 0 0 0))
+    '(0 123 128 0 0 1 0 0 0 0 0 0))
     "Header is as expected"))

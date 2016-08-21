@@ -2,6 +2,9 @@
   (:require [clojure.string :as str]
             [clojure.set :refer :all]))
 
+
+; https://www.ietf.org/rfc/rfc1035.txt
+
 ; 4.
 (defrecord Message [header questions answer-resources authority-resources additional-resources])
 
@@ -26,13 +29,6 @@
       (= len 1) (first bytes)
       (= len 2) (+ (bit-shift-left (first bytes) 3) (second bytes)))))
 
-(defn bit-to-bool
-  "Converts a bit into true or false"
-  [byte]
-  (cond
-    (= byte 0) false
-    (= byte 1) true))
-
 (defn serialize-domain-name
   [domain-name]
   "Serialize a domain name"
@@ -45,11 +41,12 @@
 
 (defn pack-num [n len]
   "Converts a number into a byte array with a given padding"
-  (let [buff (java.nio.ByteBuffer/allocate len)]
-    (vec
-      (cond
-        (= len 1) [(byte n)]
-        (= len 2) (.array (.putShort buff n))))))
+  (vec
+    (cond
+      ; java bytes are signed by default
+      (= len 1) [(bit-and n 0xFF)]
+      ; can't use java buffers because they're all signed :(
+      (= len 2) [(bit-and (bit-shift-left n 8) 0xFF) (bit-and n 0xFF)])))
 
 (defn pack-str [^String str len]
   "Converts a string into a byte array with a given padding"
@@ -107,7 +104,9 @@
   [question]
   (let [domain-name-buff (serialize-domain-name (:qname question))]
     (concat
-      (list (count domain-name-buff))
+      ; octet length is limited to 63 characters (first two bits used for
+      ; message compression)
+      (pack-num (bit-and 0x3F (count domain-name-buff)) 2)
       domain-name-buff
       (pack-num ((:qtype question) resource-type-map) 2)
       (pack-num ((:qclass question) resource-class-map) 2))))
@@ -129,7 +128,7 @@
     (pack-num (:id header) 2)
     (pack-num
       (bit-or
-        (bit-shift-left (if (:qr header) 1 0) 6)
+        (if (:qr header) 0x80 0)
         (bit-shift-left ((:opcode header) opcode-map) 4)
         (if (:aa header) 8 0)
         (if (:tc header) 4 0)
@@ -139,7 +138,7 @@
     (pack-num
       (bit-and
         ; "Z" part of header reserved for future use
-        15
+        0x0F
         (:rcode header))
       1)
     (pack-num (:qdcount header) 2)
@@ -183,6 +182,12 @@
         nscount (byte-to-num (subvec header-bytes 8 10))
         arcount (byte-to-num (subvec header-bytes 10 12))]
     (->Header id qr opcode aa tc rd ra rcode qdcount ancount nscount arcount)))
+
+(defn deserialize-question
+  "Deserialize a question from message bytes."
+  [message-bytes offset]
+
+)
 
 (defn deserialize-message
   "Deserialize a message into its component parts"
