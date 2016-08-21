@@ -17,16 +17,16 @@
   ; unclear if questions are correct
   (is (=
     (serialize-domain-name "F.ISI.ARPA")
-    '(1 70 3 73 83 73 4 65 82 80 65 0)))
+    '(0 1 70 0 3 73 83 73 0 4 65 82 80 65 0)))
   (is (=
     (serialize-domain-name "F.ISI.ARPA")
     (serialize-domain-name "f.isi.arpa")))
   (is (=
     (serialize-question (->Question "www.google.com" :a :in))
-    '(0 16 3 87 87 87 6 71 79 79 71 76 69 3 67 79 77 0 0 1 0 1)))
+    '(0 3 87 87 87 0 6 71 79 79 71 76 69 0 3 67 79 77 0 0 1 0 1)))
   (is (=
     (serialize-question (->Question "www.google.com" :mx :ch))
-    '(0 16 3 87 87 87 6 71 79 79 71 76 69 3 67 79 77 0 0 15 0 3)))
+    '(0 3 87 87 87 0 6 71 79 79 71 76 69 0 3 67 79 77 0 0 15 0 3)))
   (is (=
     (count (serialize-header (->Header 123 0 :query false false false false 0 1 0 0 0)))
     12)
