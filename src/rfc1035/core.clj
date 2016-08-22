@@ -213,19 +213,25 @@
       (= (bit-and 0xC0 length-octet) 0xC0)
         ; this is a pointer to another part of the message
         (let [pointer-offset
-            (bit-clear (bit-clear (take-int16 message-bytes offset) 15) 14)]
-          (recur message-bytes pointer-offset labels))
+            (bit-clear (bit-clear (take-int16 message-bytes offset) 15) 14)
+            labels (deserialize-labels message-bytes pointer-offset labels)]
+            {:labels (:labels labels) :offset (+ offset 2)})
       :else
         (let [label (deserialize-label message-bytes offset)]
-          (recur message-bytes (:offset label) (conj labels (:label label)))))))
+          (recur
+            message-bytes
+            (:offset label)
+            (conj labels (:label label)))))))
 
 (defn deserialize-resource-record
   "Deserialize a resource record from message bytes."
   [message-bytes offset]
+  (let [_ (trace offset)])
   (if (> offset (count message-bytes))
-    nil
+    '("parsing failure")
     (let [labels (deserialize-labels message-bytes offset [])
           label-end     (:offset labels)
+          _             (trace "do the label thing" labels)
           resource-type (get (map-invert resource-type-map)
                              (take-int16 message-bytes label-end))
           qclass        (get (map-invert resource-class-map)
