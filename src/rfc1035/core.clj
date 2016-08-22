@@ -223,6 +223,15 @@
             (:offset label)
             (conj labels (:label label)))))))
 
+(defn deserialize-rdata
+  [message-bytes offset resource-type]
+  (case resource-type
+    ; 3.3
+    :a  (let [address-as-octets (byte-array (subvec message-bytes offset (+ offset 4)))]
+          (.toString (java.net.InetAddress/getByAddress address-as-octets)))
+    :ns (:labels (deserialize-labels message-bytes offset []))
+    ))
+
 (defn deserialize-resource-record
   "Deserialize a resource record from message bytes."
   [message-bytes offset]
@@ -240,7 +249,7 @@
           rdlength      (take-int16 message-bytes (+ label-end 8))
           rdata-offset  (+ label-end 10)
           rdata-end     (+ rdata-offset rdlength)
-          rdata         (:labels (deserialize-labels message-bytes rdata-offset []))]
+          rdata         (deserialize-rdata message-bytes rdata-offset resource-type)]
       {:offset rdata-end :record (->ResourceRecord (:labels labels) resource-type qclass ttl rdata)})))
 
 (defn deserialize-question
