@@ -26,16 +26,18 @@
   "Converts a byte buffer into a number"
  [bytes]
   (let [len (count bytes)]
-    (bit-and 0xFFFF
       (cond
-        (= len 1) (first bytes)
-        (= len 2) (bit-or (bit-shift-left (first bytes) 8) (second bytes))
+        (= len 1) (bit-and 0xF (first bytes))
+        (= len 2)
+          (bit-and 0xFF
+            (bit-or (bit-shift-left (first bytes) 8) (second bytes)))
         (= len 4)
-          (bit-or
-            (bit-shift-left (get bytes 0) 24)
-            (bit-shift-left (get bytes 1) 16)
-            (bit-shift-left (get bytes 2) 8)
-            (get bytes 3))))))
+          (bit-and 0xFFFF
+            (bit-or
+              (bit-shift-left (get bytes 0) 24)
+              (bit-shift-left (get bytes 1) 16)
+              (bit-shift-left (get bytes 2) 8)
+              (get bytes 3))))))
 
 (defn take-int16
   [bytes offset]
@@ -83,6 +85,7 @@
   :minfo 14
   :mx    15
   :txt   16
+  :aaaa  28
   :srv   33
 })
 
@@ -206,15 +209,16 @@
 
 (defn deserialize-labels
   [message-bytes offset labels]
+  (trace "deserialize-labels" [message-bytes offset labels])
   (let [length-octet (get message-bytes offset)]
     (cond
       (and (= length-octet 0x00))
         {:labels (str/join "." labels) :offset (inc offset)}
       (= (bit-and 0xC0 length-octet) 0xC0)
         ; this is a pointer to another part of the message
-        (let [pointer-offset
-            (bit-clear (bit-clear (take-int16 message-bytes offset) 15) 14)
-            labels (deserialize-labels message-bytes pointer-offset labels)]
+        (let [pointer-offset (bit-clear (bit-clear (take-int16 message-bytes offset) 15) 14)
+              _ (trace "point time" pointer-offset)
+              labels (deserialize-labels message-bytes pointer-offset labels)]
             {:labels (:labels labels) :offset (+ offset 2)})
       :else
         (let [label (deserialize-label message-bytes offset)]
@@ -225,24 +229,26 @@
 
 (defn deserialize-rdata
   [message-bytes offset resource-type]
-  (case resource-type
+  (case (trace "resource-type" resource-type)
     ; 3.3
-    :a  (let [address-as-octets (byte-array (subvec message-bytes offset (+ offset 4)))]
-          (.toString (java.net.InetAddress/getByAddress address-as-octets)))
-    :ns (:labels (deserialize-labels message-bytes offset []))
+    :a    (let [address-as-octets (byte-array (subvec message-bytes offset (+ offset 4)))]
+            (.toString (java.net.InetAddress/getByAddress address-as-octets)))
+    :aaaa (let [address-as-octets (byte-array (subvec message-bytes offset (+ offset 8)))]
+            (str/join "." (map #(str (bit-and %1 0xFFFF)) address-as-octets)))
+;  https://www.ietf.org/rfc/rfc3596.txt
+    :ns   (:labels (deserialize-labels message-bytes offset []))
     ))
 
 (defn deserialize-resource-record
   "Deserialize a resource record from message bytes."
   [message-bytes offset]
-  (let [_ (trace offset)])
+  (let [_ (trace message-bytes offset)])
   (if (> offset (count message-bytes))
     '("parsing failure")
-    (let [labels (deserialize-labels message-bytes offset [])
+    (let [labels        (deserialize-labels message-bytes offset [])
           label-end     (:offset labels)
-          _             (trace "do the label thing" labels)
           resource-type (get (map-invert resource-type-map)
-                             (take-int16 message-bytes label-end))
+                             (trace "resource yo" (take-int16 message-bytes label-end)))
           qclass        (get (map-invert resource-class-map)
                              (take-int16 message-bytes (+ label-end 2)))
           ttl           (take-int32 message-bytes (+ label-end 4))
@@ -300,3 +306,38 @@
       (:records answer-records)
       (:records ns-records)
       (:records ar-records))))
+
+(defn question-to-string [question]
+  (format "Name: %s Type: %s Class: %s\n" (:qname question) (:qtype question) (:qclass question)))
+
+(defn record-to-string [record]
+  (format "Name: %s Type: %s Class: %s Data: %s\n" (:name record) (:type record) (:class record) (:rdata record)))
+
+(defrecord ResourceRecord [name type class ttl rdata])
+
+(defn message-to-string
+  [message]
+  (let [header         (:header message)]
+    (flatten
+      (list
+        (format "Questions   (%d):" (:qdcount header))
+        "\n"
+        "\n"
+        (map question-to-string (:questions message))
+        "\n"
+        (format "Answers     (%d):" (:ancount header))
+        "\n"
+        "\n"
+        (map record-to-string (:answer-resources message))
+        "\n"
+        (format "Authorities (%d):" (:nscount header))
+        "\n"
+        "\n"
+        (map record-to-string (:authority-resources message))
+        "\n"
+        (format "Additional  (%d):" (:arcount header))
+        "\n"
+        "\n"
+        (map record-to-string (:additional-resources message))))))
+
+(defn print-message [message] (println (str/join (message-to-string message))))
